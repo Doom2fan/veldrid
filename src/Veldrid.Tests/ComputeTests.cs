@@ -29,8 +29,8 @@ namespace Veldrid.Tests
 
             ResourceLayout layout = RF.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Params", ResourceKind.UniformBuffer, ShaderStages.Compute),
-                new ResourceLayoutElementDescription("Source", ResourceKind.StructuredBufferReadWrite, ShaderStages.Compute),
-                new ResourceLayoutElementDescription("Destination", ResourceKind.StructuredBufferReadWrite, ShaderStages.Compute)));
+                new ResourceLayoutElementDescription("Source", ResourceKind.StructuredBufferReadWrite, ShaderStages.Compute | ShaderStages.Vertex),
+                new ResourceLayoutElementDescription("Destination", ResourceKind.StructuredBufferReadWrite, ShaderStages.Compute | ShaderStages.Fragment)));
 
             uint width = 1024;
             uint height = 1024;
