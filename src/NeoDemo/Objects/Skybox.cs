@@ -3,6 +3,8 @@ using SixLabors.ImageSharp.PixelFormats;
 using System.Numerics;
 using Veldrid.Utilities;
 using Veldrid.ImageSharp;
+using System.Runtime.InteropServices;
+using System;
 
 namespace Veldrid.NeoDemo.Objects
 {
@@ -21,6 +23,7 @@ namespace Veldrid.NeoDemo.Objects
         private Pipeline _pipeline;
         private Pipeline _reflectionPipeline;
         private ResourceSet _resourceSet;
+        private Sampler _sampler;
         private readonly DisposeCollector _disposeCollector = new DisposeCollector();
 
         public Skybox(
@@ -35,6 +38,64 @@ namespace Veldrid.NeoDemo.Objects
             _bottom = bottom;
         }
 
+        static unsafe Texture CreateDeviceTexture (ImageSharpCubemapTexture tex, GraphicsDevice gd, ResourceFactory factory)
+        {
+            Texture cubemapTexture = factory.CreateTexture(TextureDescription.Texture2D(
+                        tex.Width,
+                        tex.Height,
+                        tex.MipLevels,
+                        1,
+                        tex.Format,
+                        TextureUsage.Sampled | TextureUsage.Cubemap | TextureUsage.GenerateMipmaps));
+
+            for (int level = 0; level < 1; level++)
+            {
+                if (!tex.CubemapTextures [0] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanPosX))
+                {
+                    throw new VeldridException ("Unable to get positive x pixelspan.");
+                }
+                if (!tex.CubemapTextures [1] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanNegX))
+                {
+                    throw new VeldridException ("Unable to get negatve x pixelspan.");
+                }
+                if (!tex.CubemapTextures [2] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanPosY))
+                {
+                    throw new VeldridException ("Unable to get positive y pixelspan.");
+                }
+                if (!tex.CubemapTextures [3] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanNegY))
+                {
+                    throw new VeldridException ("Unable to get negatve y pixelspan.");
+                }
+                if (!tex.CubemapTextures [4] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanPosZ))
+                {
+                    throw new VeldridException ("Unable to get positive z pixelspan.");
+                }
+                if (!tex.CubemapTextures [5] [level].TryGetSinglePixelSpan (out Span<Rgba32> pixelSpanNegZ))
+                {
+                    throw new VeldridException ("Unable to get negatve z pixelspan.");
+                }
+                fixed (Rgba32* positiveXPin = &MemoryMarshal.GetReference (pixelSpanPosX))
+                fixed (Rgba32* negativeXPin = &MemoryMarshal.GetReference (pixelSpanNegX))
+                fixed (Rgba32* positiveYPin = &MemoryMarshal.GetReference (pixelSpanPosY))
+                fixed (Rgba32* negativeYPin = &MemoryMarshal.GetReference (pixelSpanNegY))
+                fixed (Rgba32* positiveZPin = &MemoryMarshal.GetReference (pixelSpanPosZ))
+                fixed (Rgba32* negativeZPin = &MemoryMarshal.GetReference (pixelSpanNegZ))
+                {
+                    Image<Rgba32> image = tex.CubemapTextures[0][level];
+                    uint width = (uint)image.Width;
+                    uint height = (uint)image.Height;
+                    uint faceSize = width * height * tex.PixelSizeInBytes;
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) positiveXPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 0);
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) negativeXPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 1);
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) positiveYPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 2);
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) negativeYPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 3);
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) positiveZPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 4);
+                    gd.UpdateTexture (cubemapTexture, (IntPtr) negativeZPin, faceSize, 0, 0, 0, width, height, 1, (uint) level, 5);
+                }
+            }
+            return cubemapTexture;
+        }
+
         public override void CreateDeviceObjects(GraphicsDevice gd, CommandList cl, SceneContext sc)
         {
             ResourceFactory factory = gd.ResourceFactory;
@@ -45,10 +106,17 @@ namespace Veldrid.NeoDemo.Objects
             _ib = factory.CreateBuffer(new BufferDescription(s_indices.SizeInBytes(), BufferUsage.IndexBuffer));
             cl.UpdateBuffer(_ib, 0, s_indices);
 
-            ImageSharpCubemapTexture imageSharpCubemapTexture = new ImageSharpCubemapTexture(_right, _left, _top, _bottom, _back, _front, false);
+            ImageSharpCubemapTexture imageSharpCubemapTexture = new ImageSharpCubemapTexture(_right, _left, _top, _bottom, _back, _front, true);
 
-            Texture textureCube = imageSharpCubemapTexture.CreateDeviceTexture(gd, factory);
+            Texture textureCube = CreateDeviceTexture(imageSharpCubemapTexture, gd, factory);
+            cl.GenerateMipmaps (textureCube);
             TextureView textureView = factory.CreateTextureView(new TextureViewDescription(textureCube));
+
+            _sampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
+                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 16,
+                0, 500, 0,
+                SamplerBorderColor.TransparentBlack));
 
             VertexLayoutDescription[] vertexLayouts = new VertexLayoutDescription[]
             {
@@ -82,9 +150,10 @@ namespace Veldrid.NeoDemo.Objects
                 sc.ProjectionMatrixBuffer,
                 sc.ViewMatrixBuffer,
                 textureView,
-                gd.PointSampler));
+                _sampler));
 
             _disposeCollector.Add(_vb, _ib, textureCube, textureView, _layout, _pipeline, _reflectionPipeline, _resourceSet, vs, fs);
+            _disposeCollector.Add(_sampler);
         }
 
         public override void UpdatePerFrameResources(GraphicsDevice gd, CommandList cl, SceneContext sc)
