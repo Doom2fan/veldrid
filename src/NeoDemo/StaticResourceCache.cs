@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using Veldrid.ImageSharp;
 
 namespace Veldrid.NeoDemo
@@ -111,11 +114,42 @@ namespace Veldrid.NeoDemo
             s_resourceSets.Clear();
         }
 
+        private static unsafe Texture CreateTextureViaUpdate (ImageSharpTexture textureData, GraphicsDevice gd, ResourceFactory factory)
+        {
+            Texture tex = factory.CreateTexture(TextureDescription.Texture2D(
+                textureData.Width, textureData.Height, textureData.MipLevels, 1, textureData.Format, TextureUsage.Sampled | TextureUsage.GenerateMipmaps));
+            for (int level = 0; level < 1; level++)
+            {
+                Image<Rgba32> image = textureData.Images[level];
+                if (!image.TryGetSinglePixelSpan (out Span<Rgba32> pixelSpan))
+                {
+                    throw new VeldridException ("Unable to get image pixelspan.");
+                }
+                fixed (void* pin = &MemoryMarshal.GetReference (pixelSpan))
+                {
+                    gd.UpdateTexture (
+                        tex,
+                        (IntPtr) pin,
+                        (uint) (textureData.PixelSizeInBytes * image.Width * image.Height),
+                        0,
+                        0,
+                        0,
+                        (uint) image.Width,
+                        (uint) image.Height,
+                        1,
+                        (uint) level,
+                        0);
+                }
+            }
+
+            return tex;
+        }
+
         internal static Texture GetTexture2D(GraphicsDevice gd, ResourceFactory factory, ImageSharpTexture textureData)
         {
             if (!s_textures.TryGetValue(textureData, out Texture tex))
             {
-                tex = textureData.CreateDeviceTexture(gd, factory);
+                tex = CreateTextureViaUpdate (textureData, gd, factory);
                 s_textures.Add(textureData, tex);
             }
 

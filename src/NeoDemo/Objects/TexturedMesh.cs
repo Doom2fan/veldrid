@@ -86,6 +86,7 @@ namespace Veldrid.NeoDemo.Objects
             if (_textureData != null)
             {
                 _texture = StaticResourceCache.GetTexture2D(gd, gd.ResourceFactory, _textureData);
+                cl.GenerateMipmaps (_texture);
             }
             else
             {
